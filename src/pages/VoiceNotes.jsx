@@ -1,38 +1,36 @@
 import { useState, useRef, useEffect } from "react";
-import {
-  Mic,
-  Video,
-  Square,
-  Trash2,
-  Heart,
-  MessageCircle,
-} from "lucide-react";
+import { Mic, Video, Trash2, Heart, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import api from "@/lib/api";
+import axios from "axios";
+
+// Backend URL – your Express API running locally
+const BACKEND_URL = "http://localhost:5000";
 
 export default function VoiceNotes() {
+  // ---------------- STATE ----------------
   const [isRecording, setIsRecording] = useState(false);
-  const [recordType, setRecordType] = useState("audio");
-  const [notes, setNotes] = useState([]);
+  const [recordType, setRecordType] = useState("audio"); // audio or video
+  const [notes, setNotes] = useState([]); // all voice notes
   const [uploadProgress, setUploadProgress] = useState(0);
   const [recordTime, setRecordTime] = useState(0);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("all"); // filter by type
   const [loading, setLoading] = useState(true);
 
-  const [activeComments, setActiveComments] = useState(null);
-  const [comments, setComments] = useState({});
-  const [newComment, setNewComment] = useState({});
+  const [activeComments, setActiveComments] = useState(null); // current note showing comments
+  const [comments, setComments] = useState({}); // comments per note
+  const [newComment, setNewComment] = useState({}); // input state per note
 
+  // ---------------- REFS ----------------
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const videoPreviewRef = useRef(null);
   const timerRef = useRef(null);
 
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem("token"); // JWT from login
 
-  // ================= FETCH NOTES =================
+  // ---------------- FETCH NOTES ----------------
   useEffect(() => {
     fetchNotes();
   }, [filter]);
@@ -40,27 +38,26 @@ export default function VoiceNotes() {
   const fetchNotes = async () => {
     try {
       setLoading(true);
-      const res = await api.get(`/voice-notes?type=${filter}`, {
+      const res = await axios.get(`${BACKEND_URL}/api/voice-notes?type=${filter}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setNotes(res.data.data);
-    } catch {
+      setNotes(res.data.data || []);
+    } catch (err) {
+      console.error("Fetch notes error:", err.response?.data || err.message);
       toast.error("Failed to load notes");
     } finally {
       setLoading(false);
     }
   };
 
-  // ================= RECORDING =================
+  // ---------------- RECORDING ----------------
   const startRecording = async (type) => {
     try {
       setRecordType(type);
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: type === "video",
       });
-
       streamRef.current = stream;
 
       if (type === "video" && videoPreviewRef.current) {
@@ -72,10 +69,12 @@ export default function VoiceNotes() {
       chunksRef.current = [];
       setRecordTime(0);
 
+      // Push data chunks while recording
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
+      // When recording stops
       recorder.onstop = async () => {
         clearInterval(timerRef.current);
 
@@ -83,25 +82,20 @@ export default function VoiceNotes() {
           type: type === "video" ? "video/webm" : "audio/webm",
         });
 
-        const file = new File([blob], `${Date.now()}.webm`, {
-          type: blob.type,
-        });
+        const file = new File([blob], `${Date.now()}.webm`, { type: blob.type });
 
         await uploadFile(file, type);
 
+        // Stop all tracks
         stream.getTracks().forEach((t) => t.stop());
-        if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = null;
-        }
+        if (videoPreviewRef.current) videoPreviewRef.current.srcObject = null;
       };
 
       recorder.start();
       setIsRecording(true);
-
-      timerRef.current = setInterval(() => {
-        setRecordTime((prev) => prev + 1);
-      }, 1000);
-    } catch {
+      timerRef.current = setInterval(() => setRecordTime((prev) => prev + 1), 1000);
+    } catch (err) {
+      console.error("Recording error:", err);
       toast.error("Camera/Microphone permission denied");
     }
   };
@@ -111,256 +105,168 @@ export default function VoiceNotes() {
     setIsRecording(false);
   };
 
-  // ================= UPLOAD =================
+  // ---------------- UPLOAD FILE ----------------
   const uploadFile = async (file, type) => {
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("mediaType", type);
 
-      const res = await api.post("/voice-notes/upload", formData, {
-        headers: { Authorization: `Bearer ${token}` },
-        onUploadProgress: (progressEvent) => {
-          const percent = Math.round(
-            (progressEvent.loaded * 100) / progressEvent.total
-          );
-          setUploadProgress(percent);
-        },
+      const res = await axios.post(`${BACKEND_URL}/api/voice-notes/upload`, formData, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" },
+        onUploadProgress: (event) => setUploadProgress(Math.round((event.loaded * 100) / event.total)),
       });
 
+      // Add new note to top
       setNotes((prev) => [res.data.data, ...prev]);
       setUploadProgress(0);
       toast.success("Uploaded successfully");
-    } catch {
+    } catch (err) {
+      console.error("Upload error:", err.response?.data || err.message);
       toast.error("Upload failed");
       setUploadProgress(0);
     }
   };
 
-  // ================= DELETE =================
+  // ---------------- DELETE NOTE ----------------
   const deleteNote = async (id) => {
     try {
-      await api.delete(`/voice-notes/${id}`, {
+      await axios.delete(`${BACKEND_URL}/api/voice-notes/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      setNotes((prev) => prev.filter((note) => note.id !== id));
+      setNotes((prev) => prev.filter((n) => n.id !== id));
       toast.success("Deleted");
-    } catch {
+    } catch (err) {
+      console.error("Delete error:", err.response?.data || err.message);
       toast.error("Delete failed");
     }
   };
 
-  // ================= REACTIONS =================
+  // ---------------- REACTIONS ----------------
   const reactToNote = async (id) => {
     try {
-      const res = await api.post(
-        `/voice-notes/${id}/react`,
+      const res = await axios.post(
+        `${BACKEND_URL}/api/voice-notes/${id}/react`,
         { type: "like" },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-
       setNotes((prev) =>
-        prev.map((note) =>
-          note.id === id
-            ? { ...note, reactions_count: res.data.count }
-            : note
-        )
+        prev.map((note) => (note.id === id ? { ...note, reactions_count: res.data.count } : note))
       );
-    } catch {
+    } catch (err) {
+      console.error("React error:", err.response?.data || err.message);
       toast.error("Reaction failed");
     }
   };
 
-  // ================= COMMENTS =================
+  // ---------------- COMMENTS ----------------
   const loadComments = async (id) => {
     try {
-      const res = await api.get(`/voice-notes/${id}/comments`, {
+      const res = await axios.get(`${BACKEND_URL}/api/voice-notes/${id}/comments`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      setComments((prev) => ({
-        ...prev,
-        [id]: res.data,
-      }));
-
+      setComments((prev) => ({ ...prev, [id]: res.data }));
       setActiveComments(id);
-    } catch {
+    } catch (err) {
+      console.error("Load comments error:", err.response?.data || err.message);
       toast.error("Failed to load comments");
     }
   };
 
   const addComment = async (id) => {
     try {
-      await api.post(
-        `/voice-notes/${id}/comment`,
+      await axios.post(
+        `${BACKEND_URL}/api/voice-notes/${id}/comment`,
         { comment: newComment[id] },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-
       setNewComment((prev) => ({ ...prev, [id]: "" }));
       loadComments(id);
-    } catch {
+    } catch (err) {
+      console.error("Add comment error:", err.response?.data || err.message);
       toast.error("Comment failed");
     }
   };
 
-  // ================= UI =================
+  // ---------------- UI ----------------
   return (
-    <div className="max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6">Voice & Video Notes</h1>
+    <div className="max-w-2xl mx-auto p-4 space-y-4">
+      <h2 className="text-xl font-bold">Voice Notes</h2>
 
-      {/* FILTER */}
-      <div className="flex gap-3 mb-6">
-        <Button onClick={() => setFilter("all")}>All</Button>
-        <Button onClick={() => setFilter("audio")}>Audio</Button>
-        <Button onClick={() => setFilter("video")}>Video</Button>
-      </div>
-
-      {/* VIDEO PREVIEW */}
-      {recordType === "video" && isRecording && (
-        <video
-          ref={videoPreviewRef}
-          autoPlay
-          muted
-          className="w-full rounded-lg mb-6"
-        />
-      )}
-
-      {/* RECORD BUTTONS */}
-      <div className="flex justify-center gap-6 mb-6">
-        {!isRecording ? (
-          <>
-            <button
-              onClick={() => startRecording("audio")}
-              className="w-20 h-20 rounded-full bg-primary flex items-center justify-center"
-            >
-              <Mic className="w-8 h-8 text-white" />
-            </button>
-
-            <button
-              onClick={() => startRecording("video")}
-              className="w-20 h-20 rounded-full bg-green-600 flex items-center justify-center"
-            >
-              <Video className="w-8 h-8 text-white" />
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={stopRecording}
-            className="w-24 h-24 rounded-full bg-red-600 flex items-center justify-center animate-pulse"
-          >
-            <Square className="w-8 h-8 text-white" />
-          </button>
+      {/* Record Controls */}
+      <div className="flex gap-2">
+        <Button onClick={() => startRecording("audio")} disabled={isRecording}>
+          <Mic /> Record Audio
+        </Button>
+        <Button onClick={() => startRecording("video")} disabled={isRecording}>
+          <Video /> Record Video
+        </Button>
+        {isRecording && (
+          <Button variant="destructive" onClick={stopRecording}>
+            Stop
+          </Button>
         )}
       </div>
 
-      {isRecording && (
-        <p className="text-center text-red-500 mb-4">
-          Recording... {recordTime}s
-        </p>
-      )}
+      {/* Timer & Progress */}
+      {isRecording && <p>Recording Time: {recordTime}s</p>}
+      {uploadProgress > 0 && <p>Upload Progress: {uploadProgress}%</p>}
 
-      {/* UPLOAD PROGRESS */}
-      {uploadProgress > 0 && (
-        <div className="mb-6">
-          <div className="w-full bg-muted rounded-full h-3">
-            <div
-              className="bg-primary h-3 rounded-full transition-all"
-              style={{ width: `${uploadProgress}%` }}
-            />
-          </div>
-        </div>
-      )}
+      {/* Video Preview */}
+      {recordType === "video" && <video ref={videoPreviewRef} autoPlay muted className="w-full h-64 mt-2" />}
 
-      {/* LOADING */}
-      {loading && <p>Loading...</p>}
+      {/* Notes List */}
+      <div className="space-y-2 mt-4">
+        {loading ? (
+          <p>Loading notes...</p>
+        ) : notes.length === 0 ? (
+          <p>No notes found</p>
+        ) : (
+          notes.map((note) => (
+            <div key={note.id} className="p-2 border rounded flex flex-col gap-2">
+              {/* Audio/Video Player */}
+              {note.media_type === "audio" ? (
+                <audio controls src={note.url}></audio>
+              ) : (
+                <video controls className="w-full h-48" src={note.url}></video>
+              )}
 
-      {/* NOTES */}
-      {!loading && notes.length === 0 && (
-        <p className="text-muted-foreground text-center">
-          No notes found.
-        </p>
-      )}
-
-      <div className="space-y-6">
-        {notes.map((note) => (
-          <div key={note.id} className="p-4 border rounded-lg">
-            {note.media_type === "video" ? (
-              <video
-                src={note.media_url}
-                controls
-                poster={note.thumbnail_url || ""}
-                className="w-full rounded mb-3"
-              />
-            ) : (
-              <audio
-                src={note.media_url}
-                controls
-                className="w-full mb-3"
-              />
-            )}
-
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted-foreground">
-                {new Date(note.created_at).toLocaleString()}
-              </span>
-
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={() => reactToNote(note.id)}
-                  className="flex items-center gap-1"
-                >
-                  <Heart className="w-4 h-4 text-red-500" />
-                  <span className="text-xs">
-                    {note.reactions_count || 0}
-                  </span>
-                </button>
-
-                <button onClick={() => loadComments(note.id)}>
-                  <MessageCircle className="w-4 h-4" />
-                </button>
-
-                <button onClick={() => deleteNote(note.id)}>
-                  <Trash2 className="w-4 h-4 text-red-500" />
-                </button>
+              {/* Actions */}
+              <div className="flex gap-2">
+                <Button onClick={() => reactToNote(note.id)}>
+                  <Heart /> {note.reactions_count || 0}
+                </Button>
+                <Button onClick={() => deleteNote(note.id)}>
+                  <Trash2 /> Delete
+                </Button>
+                <Button onClick={() => loadComments(note.id)}>
+                  <MessageCircle /> Comments
+                </Button>
               </div>
-            </div>
 
-            {/* COMMENTS */}
-            {activeComments === note.id && (
-              <div className="mt-4">
-                <div className="space-y-2 mb-2">
+              {/* Comments Section */}
+              {activeComments === note.id && (
+                <div className="mt-2 space-y-1">
                   {comments[note.id]?.map((c) => (
-                    <div
-                      key={c.id}
-                      className="text-sm bg-muted p-2 rounded"
-                    >
-                      {c.comment}
-                    </div>
+                    <p key={c.id} className="text-sm border p-1 rounded">
+                      <strong>{c.user_name}:</strong> {c.comment}
+                    </p>
                   ))}
-                </div>
-
-                <div className="flex gap-2">
                   <input
+                    type="text"
                     value={newComment[note.id] || ""}
                     onChange={(e) =>
-                      setNewComment((prev) => ({
-                        ...prev,
-                        [note.id]: e.target.value,
-                      }))
+                      setNewComment((prev) => ({ ...prev, [note.id]: e.target.value }))
                     }
-                    className="flex-1 border rounded px-2 py-1 text-sm"
-                    placeholder="Write a comment..."
+                    placeholder="Add comment"
+                    className="border p-1 rounded w-full"
                   />
-                  <Button onClick={() => addComment(note.id)}>
-                    Send
-                  </Button>
+                  <Button onClick={() => addComment(note.id)}>Submit</Button>
                 </div>
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,6 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-
     if (!email || !password) {
       setError("Please fill all fields")
       return
@@ -24,30 +23,22 @@ export default function Login() {
       setLoading(true)
       setError("")
 
-      const res = await api.post("/auth/login", {
-        email,
-        password,
-      })
-
+      const res = await api.post("/auth/login", { email, password })
       const token = res.data?.data?.token
-      const user = res.data?.data?.user || { email }
+      const user = res.data?.data?.user
 
-      if (!token) {
-        throw new Error("Token not received")
-      }
+      if (!token || !user) throw new Error("Login failed, token missing")
 
-      // ✅ Store via context ONLY
+      // ✅ Save token & user in localStorage for future API calls
+      localStorage.setItem("token", token)
+      localStorage.setItem("user", JSON.stringify(user))
+
+      // ✅ Save in context
       login(user, token)
 
-      // ✅ Single navigation
       navigate("/dashboard", { replace: true })
-
     } catch (err) {
-      setError(
-        err.response?.data?.message ||
-        err.message ||
-        "Login failed"
-      )
+      setError(err.response?.data?.message || err.message || "Login failed")
     } finally {
       setLoading(false)
     }
@@ -56,15 +47,9 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md bg-card p-8 rounded-2xl shadow-lg border border-border">
-        <h2 className="text-2xl font-bold mb-6 text-center">
-          Welcome Back
-        </h2>
+        <h2 className="text-2xl font-bold mb-6 text-center">Welcome Back</h2>
 
-        {error && (
-          <p className="text-red-500 mb-4 text-sm text-center">
-            {error}
-          </p>
-        )}
+        {error && <p className="text-red-500 mb-4 text-sm text-center">{error}</p>}
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>

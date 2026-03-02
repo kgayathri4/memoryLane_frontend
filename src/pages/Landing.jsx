@@ -1,5 +1,4 @@
-import { useEffect } from "react"
-import { useNavigate, Link } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { motion } from "framer-motion"
 import { Camera, Heart, Clock, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -14,15 +13,6 @@ const features = [
 ]
 
 export default function Landing() {
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    const token = localStorage.getItem("token")
-    if (token) {
-      navigate("/dashboard")
-    }
-  }, [navigate])
-
   return (
     <div className="min-h-screen">
       {/* Hero */}
